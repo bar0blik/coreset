@@ -5,3 +5,10 @@ version = 4
 [[package]]
 name = "coreset-compiler"
 version = "0.1.0"
+dependencies = [
+ "coreset-vm",
+]
+
+[[package]]
+name = "coreset-vm"
+version = "0.1.0"

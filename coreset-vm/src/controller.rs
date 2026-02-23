@@ -19,11 +19,11 @@ pub struct Controller {
 }
 
 impl Controller {
-    pub fn new(program: Vec<u8>) -> Self {
+    pub fn new() -> Self {
         Self {
             register: 0,
             ip: 0,
-            program,
+            program: Vec::new(),
             instruction_pos: Vec::new(),
             halted: false,
             memories: Vec::new(),
@@ -34,6 +34,17 @@ impl Controller {
         self.register = 0;
         self.ip = 0;
         self.halted = false;
+    }
+
+    pub fn set_program(&mut self, program: Vec<u8>) {
+        self.program = program;
+        self.instruction_pos = vec![];
+        let mut i = 0;
+        while i < self.program.len() {
+            self.instruction_pos.push(i);
+            let param_count = (self.program[i] & 0b111) as usize;
+            i += 1 + param_count;
+        }
     }
 
     pub fn add_memory(&mut self, memory: SharedMemory) {
