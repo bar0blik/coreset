@@ -52,38 +52,47 @@ pub fn compile(source: &str) -> Vec<u8> {
 }
 
 pub fn compile_line(line: &str) -> Vec<u8> {
-    if line.starts_with(";") {
+    // Strip inline comments, early-out for comment/empty lines
+    let line = line.split(';').next().unwrap_or("").trim();
+    if line.is_empty() {
         return vec![];
     }
-    let parts: Vec<&str> = line.split_whitespace().collect();
-    if parts.is_empty() {
-        return Vec::new();
-    }
-    let parts: Vec<&str> = parts
-        .into_iter()
-        .take_while(|part| !part.starts_with(';'))
+
+    // Split into instruction and the rest at the first whitespace boundary.
+    // This ensures dashes inside instruction names (e.g. `jump-zero`) are not split.
+    let (instruction, rest) = match line.split_once(|c: char| c.is_whitespace()) {
+        Some((instr, rest)) => (instr, rest.trim()),
+        None => (line, ""),
+    };
+
+    let (mut opcode, has_param) = get_opcode(instruction);
+
+    // Split args on both whitespace and '-' in a single pass.
+    // e.g. "7-15-1" and "7 15 1" and "7-15 1" all produce ["7","15","1"].
+    let args: Vec<&str> = rest
+        .split(|c: char| c.is_whitespace() || c == '-')
+        .filter(|s| !s.is_empty())
         .collect();
-    let (mut opcode, has_param) = get_opcode(parts[0]);
-    let args = parts.len() - 1;
+
     // Check for parameter
     if !has_param {
-        if args > 0 {
-            panic!("Instruction {} does not take parameters", parts[0]);
+        if !args.is_empty() {
+            panic!("Instruction {} does not take parameters", instruction);
         }
         return vec![opcode];
     }
-    if args < 1 {
-        panic!("Instruction {} requires a parameter", parts[0]);
+    if args.is_empty() {
+        panic!("Instruction {} requires a parameter", instruction);
     }
-    if args > 8 {
-        panic!("Instruction {} has too many parameters", parts[0]);
+    if args.len() > 8 {
+        panic!("Instruction {} has too many parameters", instruction);
     }
-    // Set opcode's last 3 bits to the number of parameters
-    opcode |= args as u8;
+    // Set opcode's last 3 bits to the number of arg bytes
+    opcode |= args.len() as u8;
 
     let mut bytes = vec![opcode];
-    for part in parts.iter().skip(1) {
-        bytes.push(part.parse::<u8>().unwrap());
+    for arg in &args {
+        bytes.push(arg.parse::<u8>().unwrap());
     }
     bytes
 }
