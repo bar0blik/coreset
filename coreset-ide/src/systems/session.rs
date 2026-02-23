@@ -78,17 +78,22 @@ pub fn manage_controller_system(
     mut remove_ev: EventReader<RemoveControllerEvent>,
 ) {
     for ev in add_ev.read() {
-        let mut cs = ControllerState::new(&ev.name);
-        // Pre-load the current bytecode if already compiled.
-        if !session.bytecode.is_empty() {
-            cs.controller.set_program(session.bytecode.clone());
-        }
+        let cs = ControllerState::new(&ev.name);
         session.controllers.push(cs);
+        // Auto-select the newly created tab.
+        session.active_controller = Some(session.controllers.len() - 1);
     }
 
     for ev in remove_ev.read() {
         if ev.index < session.controllers.len() {
             session.controllers.remove(ev.index);
+            // Fix up active_controller after removal.
+            session.active_controller = if session.controllers.is_empty() {
+                None
+            } else {
+                let current = session.active_controller.unwrap_or(0);
+                Some(current.min(session.controllers.len() - 1))
+            };
         }
     }
 }

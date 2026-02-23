@@ -41,11 +41,17 @@ pub fn ui_system(
                     ui.close_menu();
                 }
                 ui.separator();
-                let save_label = if let Some(p) = &session.current_path {
-                    format!(
-                        "💾 Save  ({})",
-                        p.file_name().and_then(|n| n.to_str()).unwrap_or("?")
-                    )
+                let save_label = if let Some(cs) = session
+                    .active_controller
+                    .and_then(|i| session.controllers.get(i))
+                {
+                    match &cs.current_path {
+                        Some(p) => format!(
+                            "💾 Save  ({})",
+                            p.file_name().and_then(|n| n.to_str()).unwrap_or("?")
+                        ),
+                        None => "💾 Save".to_string(),
+                    }
                 } else {
                     "💾 Save".to_string()
                 };
@@ -99,36 +105,79 @@ pub fn ui_system(
             );
         });
 
-        if let Some(err) = &session.compile_error.clone() {
+        if let Some(err) = session
+            .active_controller
+            .and_then(|i| session.controllers.get(i))
+            .and_then(|cs| cs.compile_error.as_deref())
+        {
             ui.colored_label(egui::Color32::RED, format!("⚠  {err}"));
         }
     });
 
     // -----------------------------------------------------------------------
-    // Left: source editor
+    // Left: source editor with controller tab bar
     // -----------------------------------------------------------------------
     egui::SidePanel::left("coreset_source")
         .min_width(300.0)
         .show(ctx, |ui| {
-            // File path bar
-            let path_label = match &session.current_path {
-                Some(p) => p.to_string_lossy().into_owned(),
-                None => "Unsaved".to_string(),
-            };
+            // Tab bar — one tab per controller
+            ui.horizontal(|ui| {
+                let active = session.active_controller;
+                let mut new_active: Option<usize> = None;
+                for (i, cs) in session.controllers.iter().enumerate() {
+                    let selected = active == Some(i);
+                    let label = if selected {
+                        egui::RichText::new(&cs.name).strong()
+                    } else {
+                        egui::RichText::new(&cs.name)
+                    };
+                    if ui.selectable_label(selected, label).clicked() {
+                        new_active = Some(i);
+                    }
+                    // Close button per tab
+                    if session.controllers.len() > 0 {
+                        if ui.small_button("×").clicked() {
+                            session_ev
+                                .remove_ctrl
+                                .send(RemoveControllerEvent { index: i });
+                        }
+                    }
+                    ui.separator();
+                }
+                if let Some(i) = new_active {
+                    session.active_controller = Some(i);
+                }
+            });
+            ui.separator();
+
+            // File path bar for the active tab
+            let path_label = session
+                .active_controller
+                .and_then(|i| session.controllers.get(i))
+                .and_then(|cs| cs.current_path.as_ref())
+                .map(|p| p.to_string_lossy().into_owned())
+                .unwrap_or_else(|| "Unsaved".to_string());
             ui.horizontal(|ui| {
                 ui.weak(path_label);
             });
             ui.separator();
+
+            // Source editor for the active tab
             let avail = ui.available_size();
-            let response = ui.add(
-                egui::TextEdit::multiline(&mut session.source)
-                    .code_editor()
-                    .desired_width(avail.x)
-                    .desired_rows(40),
-            );
-            // Dynamic compilation: recompile on every keystroke.
-            if response.changed() {
-                compile_ev.send(CompileEvent);
+            if let Some(idx) = session.active_controller {
+                if let Some(cs) = session.controllers.get_mut(idx) {
+                    let response = ui.add(
+                        egui::TextEdit::multiline(&mut cs.source)
+                            .code_editor()
+                            .desired_width(avail.x)
+                            .desired_rows(40),
+                    );
+                    if response.changed() {
+                        compile_ev.send(CompileEvent);
+                    }
+                }
+            } else {
+                ui.weak("No tab open. Use File → New or open a .cst file.");
             }
         });
 
@@ -192,6 +241,8 @@ pub fn ui_system(
 
                 let n_memories = session.memories.len();
                 let running = session.mode == ExecutionMode::Running;
+                let active = session.active_controller;
+                let mut new_active: Option<usize> = None;
                 let mut ctrl_to_remove: Option<usize> = None;
                 let mut to_bind: Option<BindMemoryEvent> = None;
                 let mut to_unbind: Option<UnbindMemoryEvent> = None;
@@ -207,7 +258,9 @@ pub fn ui_system(
 
                     ui.group(|ui| {
                         ui.horizontal(|ui| {
-                            ui.strong(&cs.name);
+                            if ui.selectable_label(active == Some(ci), &cs.name).clicked() {
+                                new_active = Some(ci);
+                            }
                             ui.weak(format!("[{status}]"));
                             if ui.small_button("✕").clicked() {
                                 ctrl_to_remove = Some(ci);
@@ -261,6 +314,9 @@ pub fn ui_system(
                     session_ev
                         .remove_ctrl
                         .send(RemoveControllerEvent { index: i });
+                }
+                if let Some(i) = new_active {
+                    session.active_controller = Some(i);
                 }
                 if let Some(ev) = to_bind {
                     session_ev.bind.send(ev);
@@ -321,11 +377,15 @@ pub fn ui_system(
     egui::CentralPanel::default().show(ctx, |ui| {
         ui.heading("Decompiled Bytecode");
         egui::ScrollArea::vertical().show(ui, |ui| {
-            if session.bytecode.is_empty() {
+            let bytecode = session
+                .active_controller
+                .and_then(|i| session.controllers.get(i))
+                .map(|cs| cs.bytecode.clone())
+                .unwrap_or_default();
+            if bytecode.is_empty() {
                 ui.weak("No program compiled yet.");
             } else {
-                let decompiled = coreset_compiler::decompile(&session.bytecode);
-                // Immutable read-only viewer
+                let decompiled = coreset_compiler::decompile(&bytecode);
                 ui.add(
                     egui::TextEdit::multiline(&mut decompiled.as_str())
                         .code_editor()

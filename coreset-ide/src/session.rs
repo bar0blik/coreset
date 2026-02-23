@@ -29,6 +29,15 @@ pub struct ControllerState {
     pub controller: Controller,
     /// Indices into `CoresetSession::memories` that are bound to this controller
     pub bound_memories: Vec<usize>,
+    // --- Per-tab editor state ---
+    /// Assembly source for this controller's program.
+    pub source: String,
+    /// Last successfully compiled bytecode.
+    pub bytecode: Vec<u8>,
+    /// Most recent compile error, if any.
+    pub compile_error: Option<String>,
+    /// Path of the .cst file backing this tab (None if unsaved).
+    pub current_path: Option<PathBuf>,
 }
 
 impl ControllerState {
@@ -37,6 +46,10 @@ impl ControllerState {
             name: name.into(),
             controller: Controller::new(),
             bound_memories: Vec::new(),
+            source: String::new(),
+            bytecode: Vec::new(),
+            compile_error: None,
+            current_path: None,
         }
     }
 
@@ -67,20 +80,14 @@ pub enum ExecutionMode {
 // ---------------------------------------------------------------------------
 
 pub struct CoresetSession {
-    /// Assembly source currently in the editor.
-    pub source: String,
-    /// Last successfully compiled bytecode.
-    pub bytecode: Vec<u8>,
-    /// Most recent compile error, if any.
-    pub compile_error: Option<String>,
     /// All memory banks known to this session.
     pub memories: Vec<MemoryBank>,
-    /// All controller states.
+    /// All controller states (each is one code tab).
     pub controllers: Vec<ControllerState>,
+    /// Index of the currently visible/active tab.
+    pub active_controller: Option<usize>,
     /// Whether controllers are running continuously.
     pub mode: ExecutionMode,
-    /// Path of the currently open .cst file (None if unsaved).
-    pub current_path: Option<PathBuf>,
     /// Target instructions per second when running.
     pub run_speed: f64,
     /// Accumulated time (seconds) since last instruction tick.
@@ -90,13 +97,10 @@ pub struct CoresetSession {
 impl Default for CoresetSession {
     fn default() -> Self {
         Self {
-            source: String::new(),
-            bytecode: Vec::new(),
-            compile_error: None,
             memories: Vec::new(),
             controllers: Vec::new(),
+            active_controller: None,
             mode: ExecutionMode::Stopped,
-            current_path: None,
             run_speed: 10.0,
             run_accumulator: 0.0,
         }

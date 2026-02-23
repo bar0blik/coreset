@@ -208,21 +208,31 @@ impl Controller {
     }
 
     pub fn step(&mut self) {
-        if self.halted {
+        if self.halted || self.instruction_pos.is_empty() {
             return;
         }
-        // Guard: need ip and ip+1 to be valid indices.
-        if self.instruction_pos.is_empty() || self.ip + 1 >= self.instruction_pos.len() {
+        if self.ip >= self.instruction_pos.len() {
             self.halted = true;
             return;
         }
 
-        let instruction =
-            self.program[self.instruction_pos[self.ip]..self.instruction_pos[self.ip + 1]].to_vec();
+        let start = self.instruction_pos[self.ip];
+        let end = if self.ip + 1 < self.instruction_pos.len() {
+            self.instruction_pos[self.ip + 1]
+        } else {
+            self.program.len()
+        };
+        let instruction = self.program[start..end].to_vec();
 
+        let prev_ip = self.ip;
         self.execute(instruction);
 
-        if self.ip + 1 >= self.instruction_pos.len() {
+        // If execute didn't change ip (non-jump), advance to the next instruction.
+        if self.ip == prev_ip {
+            self.ip += 1;
+        }
+
+        if self.ip >= self.instruction_pos.len() {
             self.halted = true;
         }
     }

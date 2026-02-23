@@ -1,31 +1,30 @@
-use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use bevy::prelude::*;
 
 use crate::{events::CompileEvent, session::CoresetSession};
 
-/// Recompile the session source whenever a [`CompileEvent`] is received.
-///
-/// Any compile error (including panics from unknown mnemonics) is stored in
-/// `session.compile_error` rather than crashing the app.
+/// Recompile the active controller's source whenever a [`CompileEvent`] is received.
 pub fn compile_system(
     mut session: NonSendMut<CoresetSession>,
     mut events: EventReader<CompileEvent>,
 ) {
     for _ in events.read() {
-        let source = session.source.clone();
+        let Some(idx) = session.active_controller else {
+            events.clear();
+            return;
+        };
+
+        let source = session.controllers[idx].source.clone();
 
         let result = catch_unwind(AssertUnwindSafe(|| coreset_compiler::compile(&source)));
 
         match result {
             Ok(bytes) => {
-                session.bytecode = bytes.clone();
-                session.compile_error = None;
-                // Push the new program to every controller and reset them.
-                for cs in &mut session.controllers {
-                    cs.controller.set_program(bytes.clone());
-                    cs.controller.reset();
-                }
+                session.controllers[idx].bytecode = bytes.clone();
+                session.controllers[idx].compile_error = None;
+                session.controllers[idx].controller.set_program(bytes);
+                session.controllers[idx].controller.reset();
             }
             Err(e) => {
                 let msg = if let Some(s) = e.downcast_ref::<String>() {
@@ -35,7 +34,7 @@ pub fn compile_system(
                 } else {
                     "Unknown compile error".to_string()
                 };
-                session.compile_error = Some(msg);
+                session.controllers[idx].compile_error = Some(msg);
             }
         }
     }
