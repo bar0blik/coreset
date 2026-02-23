@@ -21,6 +21,11 @@ impl Memory {
         self.0.len()
     }
 
+    /// Expose raw cell data for display/debugging.
+    pub fn data(&self) -> &[u64] {
+        &self.0
+    }
+
     pub fn read(&self, addr: u64) -> u64 {
         self.0[addr as usize]
     }

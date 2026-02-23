@@ -1,0 +1,3 @@
+[workspace]
+members = ["coreset-vm", "coreset-compiler", "coreset-ide"]
+resolver = "2"

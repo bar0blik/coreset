@@ -1,7 +1,4 @@
-mod compile;
-mod decompile;
-use compile::compile;
-use decompile::decompile;
+use coreset_compiler::{compile, decompile};
 use std::env;
 use std::fs::File;
 use std::io::Read;

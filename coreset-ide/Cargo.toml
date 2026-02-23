@@ -1,0 +1,11 @@
+[package]
+name = "coreset-ide"
+version = "0.0.1"
+edition = "2024"
+
+[dependencies]
+bevy = "0.15"
+bevy_egui = "0.31"
+coreset-vm = { path = "../coreset-vm" }
+coreset-compiler = { path = "../coreset-compiler" }
+rfd = "0.15"

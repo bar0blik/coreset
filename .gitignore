@@ -3,3 +3,4 @@ output.bin
 *.cst
 .vscode/
 vscode-coreset-language/
+coreset-mcp/

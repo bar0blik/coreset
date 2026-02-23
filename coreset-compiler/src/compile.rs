@@ -52,10 +52,17 @@ pub fn compile(source: &str) -> Vec<u8> {
 }
 
 pub fn compile_line(line: &str) -> Vec<u8> {
+    if line.starts_with(";") {
+        return vec![];
+    }
     let parts: Vec<&str> = line.split_whitespace().collect();
     if parts.is_empty() {
         return Vec::new();
     }
+    let parts: Vec<&str> = parts
+        .into_iter()
+        .take_while(|part| !part.starts_with(';'))
+        .collect();
     let (mut opcode, has_param) = get_opcode(parts[0]);
     let args = parts.len() - 1;
     // Check for parameter

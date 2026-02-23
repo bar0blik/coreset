@@ -211,15 +211,19 @@ impl Controller {
         if self.halted {
             return;
         }
+        // Guard: need ip and ip+1 to be valid indices.
+        if self.instruction_pos.is_empty() || self.ip + 1 >= self.instruction_pos.len() {
+            self.halted = true;
+            return;
+        }
 
         let instruction =
             self.program[self.instruction_pos[self.ip]..self.instruction_pos[self.ip + 1]].to_vec();
 
         self.execute(instruction);
 
-        if self.ip as usize >= *self.instruction_pos.last().unwrap_or(&0) {
+        if self.ip + 1 >= self.instruction_pos.len() {
             self.halted = true;
-            return;
         }
     }
 }
