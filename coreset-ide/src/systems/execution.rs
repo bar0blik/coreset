@@ -46,13 +46,13 @@ pub fn execution_system(
     if session.mode == ExecutionMode::Running {
         session.run_accumulator += time.delta_secs_f64();
         let interval = 1.0 / session.run_speed.max(0.001);
+        // Clamp accumulated debt to at most 1 second to prevent a lag spike
+        // from triggering thousands of iterations in one frame.
+        session.run_accumulator = session.run_accumulator.min(1.0);
 
         while session.run_accumulator >= interval {
             session.run_accumulator -= interval;
-            let all_halted = session
-                .controllers
-                .iter()
-                .all(|cs| cs.controller.halted);
+            let all_halted = session.controllers.iter().all(|cs| cs.controller.halted);
 
             if all_halted {
                 session.mode = ExecutionMode::Stopped;

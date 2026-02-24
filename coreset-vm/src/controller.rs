@@ -143,9 +143,9 @@ impl Controller {
                 self.register,
             ),
             // Incr
-            12 => self.register += 1,
+            12 => self.register = self.register.wrapping_add(1),
             // Decr
-            13 => self.register -= 1,
+            13 => self.register = self.register.wrapping_sub(1),
             // Neg
             14 => self.register = !self.register,
             // Not
@@ -157,13 +157,30 @@ impl Controller {
                 }
             }
             // Add
-            16 => self.register += self.read_from(&instruction[1..]),
+            16 => {
+                self.register = self
+                    .register
+                    .wrapping_add(self.read_from(&instruction[1..]))
+            }
             // Sub
-            17 => self.register -= self.read_from(&instruction[1..]),
+            17 => {
+                self.register = self
+                    .register
+                    .wrapping_sub(self.read_from(&instruction[1..]))
+            }
             // Mul
-            18 => self.register *= self.read_from(&instruction[1..]),
+            18 => {
+                self.register = self
+                    .register
+                    .wrapping_mul(self.read_from(&instruction[1..]))
+            }
             // Div
-            19 => self.register /= self.read_from(&instruction[1..]),
+            19 => {
+                let rhs = self.read_from(&instruction[1..]);
+                if rhs != 0 {
+                    self.register = self.register.wrapping_div(rhs);
+                }
+            }
             // And
             20 => self.register &= self.read_from(&instruction[1..]),
             // Or
@@ -171,9 +188,9 @@ impl Controller {
             // Xor
             22 => self.register ^= self.read_from(&instruction[1..]),
             // Lshift
-            23 => self.register <<= 1,
+            23 => self.register = self.register.wrapping_shl(1),
             // Rshift
-            24 => self.register >>= 1,
+            24 => self.register = self.register.wrapping_shr(1),
             // Andi
             25 => {
                 self.register &= instruction[1..]
@@ -195,6 +212,19 @@ impl Controller {
             // Comp
             28 => {
                 let value = self.read_from(&instruction[1..]);
+                self.register = if self.register < value {
+                    0xFFFFFFFFFFFFFFFF
+                } else if self.register > value {
+                    1
+                } else {
+                    0
+                };
+            }
+            // Compi
+            29 => {
+                let value = instruction[1..]
+                    .iter()
+                    .fold(0, |acc, &b| (acc << 8) | b as u64);
                 self.register = if self.register < value {
                     0xFFFFFFFFFFFFFFFF
                 } else if self.register > value {

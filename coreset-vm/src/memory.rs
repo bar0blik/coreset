@@ -33,4 +33,9 @@ impl Memory {
     pub fn write(&mut self, addr: u64, value: u64) {
         self.0[addr as usize] = value;
     }
+
+    /// Zero all cells.
+    pub fn reset(&mut self) {
+        self.0.iter_mut().for_each(|v| *v = 0);
+    }
 }

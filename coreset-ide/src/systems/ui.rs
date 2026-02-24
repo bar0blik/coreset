@@ -99,26 +99,30 @@ pub fn ui_system(
             ui.separator();
             ui.label("Speed:");
             ui.add(
-                egui::Slider::new(&mut session.run_speed, 0.1..=1_000_000.0)
+                egui::Slider::new(&mut session.run_speed, 0.1..=10_000.0)
                     .logarithmic(true)
                     .text("ins/s"),
             );
+            // Hard-cap in case session was loaded with a higher value.
+            session.run_speed = session.run_speed.min(10_000.0);
         });
 
-        if let Some(err) = session
+        // Always reserve one line of height so the toolbar doesn't shift
+        // when the error appears or disappears.
+        let err_text = session
             .active_controller
             .and_then(|i| session.controllers.get(i))
             .and_then(|cs| cs.compile_error.as_deref())
-        {
-            ui.colored_label(egui::Color32::RED, format!("⚠  {err}"));
-        }
+            .map(|e| format!("⚠  {e}"))
+            .unwrap_or_else(|| " ".to_string());
+        ui.colored_label(egui::Color32::RED, &err_text);
     });
 
     // -----------------------------------------------------------------------
     // Left: source editor with controller tab bar
     // -----------------------------------------------------------------------
     egui::SidePanel::left("coreset_source")
-        .min_width(300.0)
+        .min_width(450.0)
         .show(ctx, |ui| {
             // Tab bar — one tab per controller
             ui.horizontal(|ui| {
@@ -162,19 +166,40 @@ pub fn ui_system(
             });
             ui.separator();
 
-            // Source editor for the active tab
-            let avail = ui.available_size();
+            // Source editor for the active tab – with instruction-address gutter.
             if let Some(idx) = session.active_controller {
                 if let Some(cs) = session.controllers.get_mut(idx) {
-                    let response = ui.add(
-                        egui::TextEdit::multiline(&mut cs.source)
-                            .code_editor()
-                            .desired_width(avail.x)
-                            .desired_rows(40),
-                    );
-                    if response.changed() {
-                        compile_ev.send(CompileEvent);
-                    }
+                    let gutter = build_gutter(&cs.source, &cs.bytecode);
+                    let indicator = build_indicator(&cs.source, cs.controller.ip);
+                    ui.horizontal_top(|ui| {
+                        let mut gutter_str = gutter.as_str();
+                        ui.add(
+                            egui::TextEdit::multiline(&mut gutter_str)
+                                .font(egui::TextStyle::Monospace)
+                                .desired_width(52.0)
+                                .desired_rows(40)
+                                .interactive(false),
+                        );
+                        // IP indicator column
+                        let mut indicator_str = indicator.as_str();
+                        ui.add(
+                            egui::TextEdit::multiline(&mut indicator_str)
+                                .font(egui::TextStyle::Monospace)
+                                .desired_width(14.0)
+                                .desired_rows(40)
+                                .interactive(false)
+                                .text_color(egui::Color32::from_rgb(80, 200, 80)),
+                        );
+                        let response = ui.add(
+                            egui::TextEdit::multiline(&mut cs.source)
+                                .code_editor()
+                                .desired_width(f32::INFINITY)
+                                .desired_rows(40),
+                        );
+                        if response.changed() {
+                            compile_ev.send(CompileEvent);
+                        }
+                    });
                 }
             } else {
                 ui.weak("No tab open. Use File → New or open a .cst file.");
@@ -220,6 +245,13 @@ pub fn ui_system(
                             bank.name,
                             bank.memory.borrow().len()
                         ));
+                        if ui
+                            .small_button("↺")
+                            .on_hover_text("Reset memory to zero")
+                            .clicked()
+                        {
+                            bank.memory.borrow_mut().reset();
+                        }
                         if ui.small_button("✕").clicked() {
                             mem_to_remove = Some(i);
                         }
@@ -332,14 +364,14 @@ pub fn ui_system(
     // -----------------------------------------------------------------------
     egui::TopBottomPanel::bottom("coreset_memory")
         .resizable(true)
-        .min_height(140.0)
+        .min_height(250.0)
+        .default_height(350.0)
         .show(ctx, |ui| {
             ui.heading("Memory Contents");
             egui::ScrollArea::both().show(ui, |ui| {
                 for (i, bank) in session.memories.iter().enumerate() {
-                    let mem = bank.memory.borrow();
-                    let data = mem.data();
-                    let header = format!("[{i}] {}  ({} cells)", bank.name, data.len());
+                    let len = bank.memory.borrow().len();
+                    let header = format!("[{i}] {}  ({} cells)", bank.name, len);
                     egui::CollapsingHeader::new(header)
                         .default_open(true)
                         .show(ui, |ui| {
@@ -353,14 +385,20 @@ pub fn ui_system(
                                         ui.strong(format!("+{col}"));
                                     }
                                     ui.end_row();
-                                    // Data rows
-                                    let rows = (data.len() + 7) / 8;
+                                    // Data rows — each cell is a live DragValue
+                                    let rows = (len + 7) / 8;
                                     for row in 0..rows {
                                         ui.monospace(format!("{}", row * 8));
                                         for col in 0..8 {
-                                            let idx = row * 8 + col;
-                                            if idx < data.len() {
-                                                ui.monospace(data[idx].to_string());
+                                            let idx = (row * 8 + col) as u64;
+                                            if (idx as usize) < len {
+                                                let mut val = bank.memory.borrow().read(idx);
+                                                if ui
+                                                    .add(egui::DragValue::new(&mut val).speed(1.0))
+                                                    .changed()
+                                                {
+                                                    bank.memory.borrow_mut().write(idx, val);
+                                                }
                                             }
                                         }
                                         ui.end_row();
@@ -374,6 +412,7 @@ pub fn ui_system(
     // -----------------------------------------------------------------------
     // Central: decompiled bytecode view
     // -----------------------------------------------------------------------
+
     egui::CentralPanel::default().show(ctx, |ui| {
         ui.heading("Decompiled Bytecode");
         egui::ScrollArea::vertical().show(ui, |ui| {
@@ -394,4 +433,74 @@ pub fn ui_system(
             }
         });
     });
+}
+
+// ---------------------------------------------------------------------------
+// Gutter helpers
+// ---------------------------------------------------------------------------
+
+/// Returns how many bytecode instructions a source line compiles to.
+/// Delegates to the compiler so labels, let, etc. are handled consistently.
+fn instructions_for_line(trimmed: &str) -> usize {
+    coreset_compiler::source_line_instruction_count(trimmed)
+}
+
+/// Build a single-character indicator column aligned with source lines.
+/// The line whose instruction index equals `current_ip` gets `▶`; all others are blank.
+/// Lines that compile to 0 instructions (labels) are treated like comments.
+fn build_indicator(source: &str, current_ip: usize) -> String {
+    let mut counter = 0usize;
+    let mut out = String::new();
+    for line in source.lines() {
+        let trimmed = line.trim();
+        let stripped = trimmed.split(';').next().unwrap_or("").trim();
+        if stripped.is_empty() {
+            out.push('\n');
+        } else {
+            let span = instructions_for_line(stripped);
+            if span == 0 {
+                // label or other zero-instruction line: no indicator slot
+                out.push('\n');
+            } else if current_ip >= counter && current_ip < counter + span {
+                out.push_str("▶\n");
+                counter += span;
+            } else {
+                out.push('\n');
+                counter += span;
+            }
+        }
+    }
+    if out.ends_with('\n') {
+        out.pop();
+    }
+    out
+}
+
+/// Build the gutter string: one line per source line.
+/// Non-empty, non-comment lines get their sequential instruction number (0-based);
+/// empty, comment, and zero-instruction lines (labels) get a blank entry.
+/// A 3-arg `let` shows the first instruction's number and advances the counter by 2.
+fn build_gutter(source: &str, _bytecode: &[u8]) -> String {
+    let mut counter = 0usize;
+    let mut gutter = String::new();
+    for line in source.lines() {
+        let trimmed = line.trim();
+        let stripped = trimmed.split(';').next().unwrap_or("").trim();
+        if stripped.is_empty() {
+            gutter.push('\n');
+        } else {
+            let span = instructions_for_line(stripped);
+            if span == 0 {
+                // label: no instruction number
+                gutter.push('\n');
+            } else {
+                gutter.push_str(&format!("{counter}\n"));
+                counter += span;
+            }
+        }
+    }
+    if gutter.ends_with('\n') {
+        gutter.pop();
+    }
+    gutter
 }
