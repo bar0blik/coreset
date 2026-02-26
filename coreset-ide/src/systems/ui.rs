@@ -440,15 +440,16 @@ pub fn ui_system(
 // ---------------------------------------------------------------------------
 
 /// Returns how many bytecode instructions a source line compiles to.
-/// Delegates to the compiler so labels, let, etc. are handled consistently.
-fn instructions_for_line(trimmed: &str) -> usize {
-    coreset_compiler::source_line_instruction_count(trimmed)
+/// Delegates to the compiler so labels, let, func, ret, call, etc. are handled consistently.
+fn instructions_for_line(trimmed: &str, func_names: &std::collections::HashSet<String>) -> usize {
+    coreset_compiler::source_line_instruction_count(trimmed, func_names)
 }
 
 /// Build a single-character indicator column aligned with source lines.
 /// The line whose instruction index equals `current_ip` gets `▶`; all others are blank.
-/// Lines that compile to 0 instructions (labels) are treated like comments.
+/// Lines that compile to 0 instructions (labels, func, call-block openers) get no slot.
 fn build_indicator(source: &str, current_ip: usize) -> String {
+    let func_names = coreset_compiler::scan_function_names(source);
     let mut counter = 0usize;
     let mut out = String::new();
     for line in source.lines() {
@@ -457,9 +458,8 @@ fn build_indicator(source: &str, current_ip: usize) -> String {
         if stripped.is_empty() {
             out.push('\n');
         } else {
-            let span = instructions_for_line(stripped);
+            let span = instructions_for_line(stripped, &func_names);
             if span == 0 {
-                // label or other zero-instruction line: no indicator slot
                 out.push('\n');
             } else if current_ip >= counter && current_ip < counter + span {
                 out.push_str("▶\n");
@@ -478,9 +478,9 @@ fn build_indicator(source: &str, current_ip: usize) -> String {
 
 /// Build the gutter string: one line per source line.
 /// Non-empty, non-comment lines get their sequential instruction number (0-based);
-/// empty, comment, and zero-instruction lines (labels) get a blank entry.
-/// A 3-arg `let` shows the first instruction's number and advances the counter by 2.
+/// empty, comment, and zero-instruction lines (labels, func, call-block openers) get a blank.
 fn build_gutter(source: &str, _bytecode: &[u8]) -> String {
+    let func_names = coreset_compiler::scan_function_names(source);
     let mut counter = 0usize;
     let mut gutter = String::new();
     for line in source.lines() {
@@ -489,9 +489,8 @@ fn build_gutter(source: &str, _bytecode: &[u8]) -> String {
         if stripped.is_empty() {
             gutter.push('\n');
         } else {
-            let span = instructions_for_line(stripped);
+            let span = instructions_for_line(stripped, &func_names);
             if span == 0 {
-                // label: no instruction number
                 gutter.push('\n');
             } else {
                 gutter.push_str(&format!("{counter}\n"));
